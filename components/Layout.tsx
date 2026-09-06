@@ -17,7 +17,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     <div className="bg-primary/10 p-2 rounded-lg text-primary">
                         <span className="material-symbols-outlined">swords</span>
                     </div>
-                    <h1 className="font-bold text-lg text-text-main dark:text-white">YOLO Loot</h1>
+                    <h1 className="font-bold text-lg text-text-main dark:text-white">LOLBR Loot</h1>
                 </div>
                 <button className="p-2 text-text-muted">
                     <span className="material-symbols-outlined">menu</span>
@@ -32,7 +32,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                             <span className="material-symbols-outlined">diamond</span>
                         </div>
                         <div className="flex flex-col">
-                            <h1 className="text-xl font-bold leading-tight dark:text-white">YOLO Loot</h1>
+                            <h1 className="text-xl font-bold leading-tight dark:text-white">LOLBR Loot</h1>
                             <span className="text-xs font-medium text-primary uppercase tracking-wider">v2.0</span>
                         </div>
                     </div>
