@@ -7,7 +7,7 @@ import AdminGuard from '../components/AdminGuard';
 import { PlayerProfileModal } from '../components/PlayerProfileModal';
 
 const PlayerRegistration: React.FC = () => {
-    const { addPlayer, players, items, updatePlayer, deletePlayer } = useGame();
+    const { addPlayer, players, items, updatePlayer, deletePlayer, playerPriorityMode, setPlayerPriorityMode, reorderPlayers } = useGame();
 
     // Form State
     const [name, setName] = useState('');
@@ -19,6 +19,23 @@ const PlayerRegistration: React.FC = () => {
     const [viewingPlayer, setViewingPlayer] = useState<Player | null>(null);
     const [excludedItemIds, setExcludedItemIds] = useState<string[]>([]);
     const [appendToQueueEnd, setAppendToQueueEnd] = useState(true);
+    const [updatingPlayerId, setUpdatingPlayerId] = useState<string | null>(null);
+    const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
+    const [dragOverPlayerId, setDragOverPlayerId] = useState<string | null>(null);
+    const [savingPriority, setSavingPriority] = useState(false);
+
+    const displayedPlayers = React.useMemo(() => [...players].sort((a, b) => {
+        if (playerPriorityMode === 'manual') {
+            const positionDifference = (a.queuePosition ?? Number.MAX_SAFE_INTEGER) - (b.queuePosition ?? Number.MAX_SAFE_INTEGER);
+            if (positionDifference !== 0) return positionDifference;
+        }
+        const parseCP = (value: string) => {
+            const normalized = value.trim().toUpperCase();
+            const multiplier = normalized.endsWith('B') ? 1_000_000_000 : normalized.endsWith('M') ? 1_000_000 : normalized.endsWith('K') ? 1_000 : 1;
+            return (Number.parseFloat(normalized.replace(/[^0-9.]/g, '')) || 0) * multiplier;
+        };
+        return parseCP(b.cp) - parseCP(a.cp) || a.name.localeCompare(b.name);
+    }), [players, playerPriorityMode]);
 
     const classAvatars: Record<ClassType, string> = {
         'Elf': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Elf&backgroundColor=c0aede',
@@ -159,17 +176,51 @@ const PlayerRegistration: React.FC = () => {
         }
     };
 
-    const parseCP = (cpStr: string): number => {
-        const cleanStr = cpStr.toUpperCase().replace(/[^0-9.KMB]/g, '');
-        let multiplier = 1;
-        if (cleanStr.endsWith('K')) multiplier = 1000;
-        else if (cleanStr.endsWith('M')) multiplier = 1000000;
-        else if (cleanStr.endsWith('B')) multiplier = 1000000000;
-
-        const numValue = parseFloat(cleanStr.replace(/[KMB]/g, ''));
-        return isNaN(numValue) ? 0 : numValue * multiplier;
+    const handleToggleActive = async (player: Player) => {
+        setUpdatingPlayerId(player.id);
+        try {
+            await updatePlayer(player.id, { isActive: player.isActive === false });
+        } catch (error) {
+            console.error('Error updating player status:', error);
+            alert('Could not update the player status. Please try again.');
+        } finally {
+            setUpdatingPlayerId(null);
+        }
     };
 
+    const handlePriorityModeChange = async (mode: 'cp' | 'manual') => {
+        if (mode === playerPriorityMode) return;
+        setSavingPriority(true);
+        try {
+            await setPlayerPriorityMode(mode);
+        } catch (error) {
+            console.error('Error saving priority mode:', error);
+            alert('Could not save the priority mode. Please try again.');
+        } finally {
+            setSavingPriority(false);
+        }
+    };
+
+    const handlePlayerDrop = async (targetPlayerId: string) => {
+        if (playerPriorityMode !== 'manual' || !draggedPlayerId || draggedPlayerId === targetPlayerId) return;
+        const orderedIds = displayedPlayers.map(player => player.id);
+        const sourceIndex = orderedIds.indexOf(draggedPlayerId);
+        const targetIndex = orderedIds.indexOf(targetPlayerId);
+        if (sourceIndex === -1 || targetIndex === -1) return;
+        const [movedId] = orderedIds.splice(sourceIndex, 1);
+        orderedIds.splice(targetIndex, 0, movedId);
+        setSavingPriority(true);
+        try {
+            await reorderPlayers(orderedIds);
+        } catch (error) {
+            console.error('Error saving player order:', error);
+            alert('Could not save the player order. Please try again.');
+        } finally {
+            setSavingPriority(false);
+            setDraggedPlayerId(null);
+            setDragOverPlayerId(null);
+        }
+    };
 
     return (
         <AdminGuard>
@@ -384,39 +435,72 @@ const PlayerRegistration: React.FC = () => {
 
                     {/* Right Column: List */}
                     <div className="flex-1 min-w-0 space-y-4">
-                        <div className="flex items-center justify-between px-2">
+                        <div className="flex flex-col gap-3 px-2 sm:flex-row sm:items-center sm:justify-between">
                             <h3 className="font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
                                 {players.length} Players Registered
                             </h3>
-                            <div className="flex gap-2">
-                                <button className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors text-gray-400 hover:text-primary">
-                                    <span className="material-symbols-outlined">filter_list</span>
+                            <div className="flex rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-black/20">
+                                <button type="button" disabled={savingPriority} onClick={() => handlePriorityModeChange('cp')} className={`rounded-lg px-3 py-2 text-xs font-bold transition-all disabled:opacity-50 ${playerPriorityMode === 'cp' ? 'bg-white text-primary shadow-sm dark:bg-gray-700' : 'text-gray-500'}`}>
+                                    CP Priority
                                 </button>
-                                <button className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors text-gray-400 hover:text-primary">
-                                    <span className="material-symbols-outlined">search</span>
+                                <button type="button" disabled={savingPriority} onClick={() => handlePriorityModeChange('manual')} className={`rounded-lg px-3 py-2 text-xs font-bold transition-all disabled:opacity-50 ${playerPriorityMode === 'manual' ? 'bg-white text-primary shadow-sm dark:bg-gray-700' : 'text-gray-500'}`}>
+                                    Manual Priority
                                 </button>
                             </div>
                         </div>
 
+                        <p className="px-2 text-xs text-gray-500">
+                            {playerPriorityMode === 'cp'
+                                ? 'Top 5 items use the five active players with the highest CP.'
+                                : 'Drag players to define the priority. Top 5 items use the first five active players in this list.'}
+                        </p>
+
                         <div className="grid gap-3">
                             {players.length > 0 ? (
-                                players.map((player) => (
+                                displayedPlayers.map((player, index) => (
                                     <div
                                         key={player.id}
-                                        onClick={(e) => {
-                                            // Handle click to open modal, but prevent if clicking action buttons
-                                            setViewingPlayer(player);
+                                        onClick={() => setViewingPlayer(player)}
+                                        draggable={playerPriorityMode === 'manual' && !savingPriority}
+                                        onDragStart={event => {
+                                            event.dataTransfer.effectAllowed = 'move';
+                                            setDraggedPlayerId(player.id);
                                         }}
-                                        className="bg-surface-light dark:bg-surface-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 flex items-center justify-between group hover:border-primary/30 transition-all shadow-sm cursor-pointer hover:shadow-md"
+                                        onDragOver={event => {
+                                            if (playerPriorityMode !== 'manual') return;
+                                            event.preventDefault();
+                                            setDragOverPlayerId(player.id);
+                                        }}
+                                        onDrop={event => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            void handlePlayerDrop(player.id);
+                                        }}
+                                        onDragEnd={() => {
+                                            setDraggedPlayerId(null);
+                                            setDragOverPlayerId(null);
+                                        }}
+                                        className={`p-4 rounded-2xl border flex items-center justify-between group transition-all shadow-sm cursor-pointer hover:shadow-md ${dragOverPlayerId === player.id ? 'ring-2 ring-primary/40' : ''} ${player.isActive === false
+                                            ? 'bg-gray-100 dark:bg-gray-900/70 grayscale opacity-70'
+                                            : 'bg-surface-light dark:bg-surface-dark'
+                                            } border-gray-100 dark:border-gray-800 hover:border-primary/30`}
                                     >
                                         <div className="flex items-center gap-4">
+                                            <div className="flex w-7 shrink-0 items-center justify-center text-xs font-black text-gray-400">
+                                                {playerPriorityMode === 'manual' ? <span className="material-symbols-outlined text-xl">drag_indicator</span> : `#${index + 1}`}
+                                            </div>
                                             <div className="relative">
                                                 <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-black/20 overflow-hidden">
                                                     <img src={player.avatarUrl} alt={player.name} className="w-full h-full object-cover" />
                                                 </div>
                                             </div>
                                             <div>
-                                                <h4 className="font-bold text-gray-900 dark:text-white leading-tight">{player.name}</h4>
+                                                <div className="flex items-center gap-2">
+                                                    <h4 className="font-bold text-gray-900 dark:text-white leading-tight">{player.name}</h4>
+                                                    {player.isActive === false && (
+                                                        <span className="rounded-full bg-gray-300 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-600 dark:bg-gray-700 dark:text-gray-300">Inactive</span>
+                                                    )}
+                                                </div>
                                                 <div className="flex items-center gap-2 text-xs mt-1">
                                                     <span className="px-2 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-500 font-medium">
                                                         {player.class}
@@ -432,6 +516,18 @@ const PlayerRegistration: React.FC = () => {
                                         </div>
 
                                         <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleToggleActive(player)}
+                                                disabled={updatingPlayerId === player.id}
+                                                className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${player.isActive === false
+                                                    ? 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
+                                                    : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                                                    }`}
+                                                title={player.isActive === false ? 'Reactivate player' : 'Deactivate player'}
+                                            >
+                                                <span className="material-symbols-outlined text-xl">{player.isActive === false ? 'person_check' : 'person_off'}</span>
+                                            </button>
                                             <button
                                                 onClick={() => handleClone(player)}
                                                 className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"

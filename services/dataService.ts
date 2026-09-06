@@ -7,15 +7,18 @@ import {
     query,
     orderBy,
     updateDoc,
-    writeBatch
+    writeBatch,
+    setDoc
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Player, Item, LootEvent } from '../types';
+import { Player, Item, LootEvent, PlayerPriorityMode } from '../types';
 
 // Collection References
 const PLAYERS_COLLECTION = 'players';
 const ITEMS_COLLECTION = 'items';
 const HISTORY_COLLECTION = 'history';
+const SETTINGS_COLLECTION = 'settings';
+const PRIORITY_SETTINGS_DOCUMENT = 'playerPriority';
 
 // --- PLAYERS SERVICE ---
 
@@ -109,6 +112,23 @@ export const subscribeToHistory = (callback: (history: LootEvent[]) => void) => 
 
 export const addLootEvent = async (event: Omit<LootEvent, 'id'>) => {
     return await addDoc(collection(db, HISTORY_COLLECTION), event);
+};
+
+export const reorderPlayers = async (playerIds: string[]) => {
+    const batch = writeBatch(db);
+    playerIds.forEach((playerId, queuePosition) => {
+        batch.update(doc(db, PLAYERS_COLLECTION, playerId), { queuePosition });
+    });
+    await batch.commit();
+};
+
+export const subscribeToPlayerPriorityMode = (callback: (mode: PlayerPriorityMode) => void) =>
+    onSnapshot(doc(db, SETTINGS_COLLECTION, PRIORITY_SETTINGS_DOCUMENT), snapshot => {
+        callback(snapshot.exists() && snapshot.data().mode === 'manual' ? 'manual' : 'cp');
+    });
+
+export const savePlayerPriorityMode = async (mode: PlayerPriorityMode) => {
+    await setDoc(doc(db, SETTINGS_COLLECTION, PRIORITY_SETTINGS_DOCUMENT), { mode }, { merge: true });
 };
 
 export const commitDistribution = async ({

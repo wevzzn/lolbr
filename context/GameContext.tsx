@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { Player, Item, LootEvent, DistributableItem, LootStatus, NewPlayer } from '../types';
+import { Player, Item, LootEvent, DistributableItem, LootStatus, NewPlayer, PlayerPriorityMode } from '../types';
 import {
   subscribeToPlayers,
   subscribeToItems,
@@ -11,10 +11,12 @@ import {
   deleteItem,
   updateItem,
   deleteLootEvent,
-  commitDistribution
+  commitDistribution,
+  reorderPlayers,
+  subscribeToPlayerPriorityMode,
+  savePlayerPriorityMode
 } from '../services/dataService';
-import { getNewPlayerInsertionIndex, getQueuePlayerIds, movePlayerToQueueEnd, rotateQueueThroughPlayer } from '../utils/priority';
-import { parseCP } from '../utils/formatters';
+import { getNewPlayerInsertionIndex, getQueuePlayerIds, movePlayerToQueueEnd, rotateQueueThroughPlayer, sortPlayersByPriority } from '../utils/priority';
 
 interface GameContextType {
   players: Player[];
@@ -33,6 +35,9 @@ interface GameContextType {
   clearPlayers: () => Promise<void>;
   clearItems: () => Promise<void>;
   clearHistory: () => Promise<void>;
+  playerPriorityMode: PlayerPriorityMode;
+  setPlayerPriorityMode: (mode: PlayerPriorityMode) => Promise<void>;
+  reorderPlayers: (playerIds: string[]) => Promise<void>;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -42,17 +47,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [items, setItems] = useState<Item[]>([]);
   const [lootHistory, setLootHistory] = useState<LootEvent[]>([]);
   const [distributionQueue, setDistributionQueue] = useState<DistributableItem[]>([]);
+  const [playerPriorityMode, setPlayerPriorityModeState] = useState<PlayerPriorityMode>('cp');
 
   // Subscribe to Firebase data
   useEffect(() => {
     const unsubPlayers = subscribeToPlayers(setPlayers);
     const unsubItems = subscribeToItems(setItems);
     const unsubHistory = subscribeToHistory(setLootHistory);
+    const unsubPriorityMode = subscribeToPlayerPriorityMode(setPlayerPriorityModeState);
 
     return () => {
       unsubPlayers();
       unsubItems();
       unsubHistory();
+      unsubPriorityMode();
     };
   }, []);
 
@@ -61,17 +69,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...newPlayerData,
       dkp: 0,
       avatarUrl: newPlayerData.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${newPlayerData.name}`,
-      status: 'Online'
+      status: 'Online',
+      isActive: true,
+      queuePosition: players.reduce((maximum, player) => Math.max(maximum, player.queuePosition ?? -1), -1) + 1
     };
 
     const itemQueues = items
       .filter(item => !(newPlayer.excludedItemIds ?? []).includes(item.id))
       .map(item => {
-        const queuePlayerIds = getQueuePlayerIds(item, players);
+        const queuePlayerIds = getQueuePlayerIds(item, players, playerPriorityMode);
         const insertionIndex = getNewPlayerInsertionIndex(
           queuePlayerIds,
-          players,
-          newPlayer.cp,
           appendToQueueEnd
         );
         return { itemId: item.id, queuePlayerIds, insertionIndex };
@@ -81,8 +89,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const handleAddItem = async (newItemData: Omit<Item, 'id'>) => {
-    const queuePlayerIds = [...players]
-      .sort((a, b) => parseCP(b.cp) - parseCP(a.cp))
+    const queuePlayerIds = sortPlayersByPriority(players.filter(player => player.isActive !== false), playerPriorityMode)
       .map(player => player.id);
     await addItem({ ...newItemData, queuePlayerIds });
   };
@@ -111,7 +118,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!fullItem) throw new Error(`Item not found: ${distItem.name}`);
     const cost = status === 'Acquired' ? fullItem.cost : 0;
 
-    const currentQueue = getQueuePlayerIds(fullItem, players);
+    const currentQueue = getQueuePlayerIds(fullItem, players, playerPriorityMode);
     const playerIndex = currentQueue.indexOf(playerId);
     if (playerIndex === -1) throw new Error('Player is not eligible for this item.');
 
@@ -137,7 +144,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       events,
       itemId: fullItem.id,
       queuePlayerIds,
-      lastRecipientId: status === 'Acquired' ? playerId : undefined,
+      lastRecipientId: playerId,
       playerUpdate: status === 'Acquired' && player
         ? { playerId, data: { dkp: Math.max(0, player.dkp - cost) } }
         : undefined
@@ -148,7 +155,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? {
             ...item,
             queuePlayerIds,
-            ...(status === 'Acquired' ? { lastRecipientId: playerId } : {})
+            lastRecipientId: playerId
           }
         : item
     ));
@@ -191,7 +198,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       clearHistory: async () => {
         const promises = lootHistory.map(h => deleteLootEvent(h.id));
         await Promise.all(promises);
-      }
+      },
+      playerPriorityMode,
+      setPlayerPriorityMode: async (mode) => {
+        if (mode === 'manual') {
+          const orderedIds = sortPlayersByPriority(players, players.some(player => player.queuePosition !== undefined) ? 'manual' : 'cp')
+            .map(player => player.id);
+          await reorderPlayers(orderedIds);
+        }
+        await savePlayerPriorityMode(mode);
+      },
+      reorderPlayers
     }}>
       {children}
     </GameContext.Provider>

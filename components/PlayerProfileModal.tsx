@@ -10,14 +10,14 @@ interface PlayerProfileModalProps {
 }
 
 export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({ player, onClose }) => {
-    const { items, lootHistory, players } = useGame();
+    const { items, lootHistory, players, playerPriorityMode } = useGame();
 
     // 1. Calculate Next Eligible Items
     const nextItems = useMemo(() => {
         const eligibleItems: { item: Item; rank: number }[] = [];
 
         items.forEach(item => {
-            const queue = getPlayerQueue(item, players);
+            const queue = getPlayerQueue(item, players, true, playerPriorityMode);
             const rankIndex = queue.findIndex(p => p.id === player.id);
 
             // Only show if they are in top 3 or top 5 depending on rule, 
@@ -29,7 +29,7 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({ player, 
 
         // Sort by rank (1st place first)
         return eligibleItems.sort((a, b) => a.rank - b.rank);
-    }, [items, players, player.id]);
+    }, [items, players, player.id, playerPriorityMode]);
 
     // 2. Calculate History Stats using map
     const historyStats = useMemo(() => {

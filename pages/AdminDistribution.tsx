@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { Item, Player } from '../types';
-import { parseCP } from '../utils/formatters';
 import AdminGuard from '../components/AdminGuard';
 
-import { getPlayerQueue } from '../utils/priority';
+import { getOriginalPlayerQueue, getPlayerQueue } from '../utils/priority';
 
 const AdminDistribution: React.FC = () => {
-    const { players, items, distributeItem, addToDistributionQueue, distributionQueue, removeFromDistributionQueue, clearPlayers, clearItems, clearHistory } = useGame();
+    const { players, items, distributeItem, addToDistributionQueue, distributionQueue, removeFromDistributionQueue, clearPlayers, clearItems, clearHistory, playerPriorityMode } = useGame();
 
     // Local state for adding items to queue
     const [selectedItem, setSelectedItem] = useState<Item | null>(null);
@@ -22,14 +21,12 @@ const AdminDistribution: React.FC = () => {
     if (currentItem) {
         const fullItem = items.find(i => i.name === currentItem.name);
         if (fullItem) {
-            sortedPlayers = getPlayerQueue(fullItem, players);
+            sortedPlayers = getPlayerQueue(fullItem, players, true, playerPriorityMode);
         } else {
-            // Fallback: Just sort by CP
-            sortedPlayers = [...players].sort((a, b) => parseCP(b.cp) - parseCP(a.cp));
+            sortedPlayers = getOriginalPlayerQueue({ id: '', name: '', rarity: 'Common', stats: '', chance: '', iconUrl: '', cost: 0 }, players, false, playerPriorityMode);
         }
     } else {
-        // Default: Sort by CP
-        sortedPlayers = [...players].sort((a, b) => parseCP(b.cp) - parseCP(a.cp));
+        sortedPlayers = getOriginalPlayerQueue({ id: '', name: '', rarity: 'Common', stats: '', chance: '', iconUrl: '', cost: 0 }, players, false, playerPriorityMode);
     }
 
     const handleAddItem = () => {
