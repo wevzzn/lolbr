@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Player, Item, LootEvent, PlayerPriorityMode } from '../types';
+import { sortHistoryNewestFirst } from '../utils/history';
 
 // Collection References
 const PLAYERS_COLLECTION = 'players';
@@ -99,14 +100,13 @@ export const deleteItem = async (id: string) => {
 // --- HISTORY SERVICE ---
 
 export const subscribeToHistory = (callback: (history: LootEvent[]) => void) => {
-    // Ordered by most recent first
-    const q = query(collection(db, HISTORY_COLLECTION), orderBy('date', 'desc')); // Note: Date string sorting might be tricky if not ISO, but sticking to simple string for now as per types
+    const q = collection(db, HISTORY_COLLECTION);
     return onSnapshot(q, (snapshot) => {
         const history = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
         } as LootEvent));
-        callback(history);
+        callback(sortHistoryNewestFirst(history));
     });
 };
 
